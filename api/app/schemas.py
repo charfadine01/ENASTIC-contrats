@@ -144,7 +144,7 @@ class ContractGenerateRequest(BaseModel):
     nom_enseignant: str = Field(min_length=1, max_length=255)
     grade: str
     annee: int = Field(ge=2000, le=2100)
-    annee_academique: str = Field(pattern=r"^\d{4}/\d{4}$")
+    annee_academique: str = Field(pattern=r"^\d{4}-\d{4}$")
     directeur_general: str | None = None
     arrete: str | None = None
     ecues: list[EcueInput] = Field(min_length=1)

@@ -8,9 +8,13 @@ import Academic from "@/pages/Academic";
 import Users from "@/pages/Users";
 import Profile from "@/pages/Profile";
 import Settings from "@/pages/Settings";
+import Splash from "@/pages/Splash";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, apiStatus } = useAuth();
+  if (apiStatus !== "ready") {
+    return <Splash status={apiStatus} onRetry={() => window.location.reload()} />;
+  }
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-gray-500">
@@ -19,6 +23,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+function LoginGate({ children }: { children: React.ReactNode }) {
+  const { apiStatus } = useAuth();
+  if (apiStatus !== "ready") {
+    return <Splash status={apiStatus} onRetry={() => window.location.reload()} />;
+  }
   return <>{children}</>;
 }
 
@@ -33,7 +45,14 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/login" element={<Login />} />
+          <Route
+            path="/login"
+            element={
+              <LoginGate>
+                <Login />
+              </LoginGate>
+            }
+          />
           <Route
             path="/"
             element={

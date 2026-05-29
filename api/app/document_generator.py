@@ -115,17 +115,39 @@ class ContractGenerator:
             borders.append(elem)
         tc_pr.append(borders)
 
+    @staticmethod
+    def _is_total_row(row) -> bool:
+        """Détecte une ligne dont la première cellule contient 'Total'."""
+        if not row.cells:
+            return False
+        first_text = row.cells[0].text.strip().lower()
+        return first_text.startswith("total")
+
     def _fill_ecue_table(self, table, ecues: list[dict]) -> None:
+        """
+        Remplit le tableau ECUE en préservant :
+          - la ligne d'en-tête (ligne 0)
+          - la ligne TOTAL (si présente, généralement la dernière)
+        Calcule automatiquement le total des heures CM / TD / TP et l'écrit
+        dans la ligne TOTAL.
+        """
         if not ecues or len(table.rows) <= 1:
             return
 
-        # Sauvegarder le style de la ligne modèle (ligne 1)
-        model_row = table.rows[1]
+        # 1) Identifier les positions clés
+        rows = table.rows
+        total_row_idx = None
+        for i, row in enumerate(rows):
+            if i > 0 and self._is_total_row(row):
+                total_row_idx = i
+                break
+
+        # 2) Sauvegarder le style de la ligne modèle (première ligne de données)
+        model_row = rows[1]
         cell_styles = [
             deepcopy(c._element.tcPr) if c._element.tcPr is not None else None
             for c in model_row.cells
         ]
-        # Sauvegarder aussi le style de paragraphe pour préserver alignement/police
         para_styles = []
         for c in model_row.cells:
             if c.paragraphs and c.paragraphs[0]._element.pPr is not None:
@@ -133,13 +155,22 @@ class ContractGenerator:
             else:
                 para_styles.append(None)
 
-        # Supprimer toutes les lignes sauf l'en-tête
-        for i in range(len(table.rows) - 1, 0, -1):
-            row_elem = table.rows[i]._element
+        # 3) Sauvegarder la ligne TOTAL en entier (XML brut) si présente
+        total_row_xml = None
+        if total_row_idx is not None:
+            total_row_xml = deepcopy(rows[total_row_idx]._element)
+
+        # 4) Supprimer toutes les lignes sauf l'en-tête
+        for i in range(len(rows) - 1, 0, -1):
+            row_elem = rows[i]._element
             row_elem.getparent().remove(row_elem)
 
-        # Recréer une ligne par ECUE en réappliquant explicitement les bordures
+        # 5) Insérer une ligne par ECUE (en réappliquant les styles)
+        sum_cm = sum_td = sum_tp = 0
         for ecue in ecues:
+            sum_cm += int(ecue.get("heures_cm", 0) or 0)
+            sum_td += int(ecue.get("heures_td", 0) or 0)
+            sum_tp += int(ecue.get("heures_tp", 0) or 0)
             new_row = table.add_row()
             values = [
                 ecue.get("intitule", ""),
@@ -150,23 +181,39 @@ class ContractGenerator:
             for j, cell in enumerate(new_row.cells):
                 cell.text = values[j] if j < len(values) else ""
 
-                # Réappliquer tout le tcPr (largeur, alignement vertical, bordures)
                 if j < len(cell_styles) and cell_styles[j] is not None:
                     existing_tcpr = cell._element.find(qn("w:tcPr"))
                     if existing_tcpr is not None:
                         cell._element.remove(existing_tcpr)
                     cell._element.insert(0, deepcopy(cell_styles[j]))
 
-                # Garantir des bordures visibles (filet noir 0.5pt)
                 self._ensure_cell_borders(cell)
 
-                # Réappliquer l'alignement du paragraphe modèle
                 if j < len(para_styles) and para_styles[j] is not None and cell.paragraphs:
                     para = cell.paragraphs[0]
                     existing_ppr = para._element.find(qn("w:pPr"))
                     if existing_ppr is not None:
                         para._element.remove(existing_ppr)
                     para._element.insert(0, deepcopy(para_styles[j]))
+
+        # 6) Réinsérer la ligne TOTAL (avec son style d'origine) + remplir les sommes
+        if total_row_xml is not None:
+            table._element.append(total_row_xml)
+            total_row = table.rows[-1]
+            # Garder le libellé d'origine en cellule 0 (Total) ; remplir CM/TD/TP
+            sums = [None, str(sum_cm), str(sum_td), str(sum_tp)]
+            for j, cell in enumerate(total_row.cells):
+                if j == 0:
+                    continue  # ne pas toucher au libellé "Total"
+                if j < len(sums) and sums[j] is not None:
+                    # Vider et remettre la valeur en gras
+                    for para in list(cell.paragraphs):
+                        for run in list(para.runs):
+                            run._element.getparent().remove(run._element)
+                    para = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+                    run = para.add_run(sums[j])
+                    run.bold = True
+                self._ensure_cell_borders(cell)
 
     @staticmethod
     def _hash_contract(data: dict, contract_uuid: str) -> str:
@@ -314,6 +361,20 @@ class ContractGenerator:
                     underline=True,
                 )
 
+    @staticmethod
+    def _remove_existing_qr_codes(doc: Document) -> None:
+        """
+        Supprime tous les paragraphes vides qui contiennent un drawing (= ancien
+        QR code embarqué dans le template). Préserve les drawings situés dans des
+        paragraphes contenant du texte (ex: logo ENASTIC).
+        """
+        for para in list(doc.paragraphs):
+            if para.text.strip():
+                continue
+            drawings = para._element.findall(".//" + qn("w:drawing"))
+            if drawings:
+                para._element.getparent().remove(para._element)
+
     def _embed_qr_code(self, doc: Document, qr_image: BytesIO) -> None:
         """
         Place un petit QR code (~8 mm) discret en bas à GAUCHE de la même page
@@ -441,10 +502,14 @@ class ContractGenerator:
         grade = data.get("grade", "")
         annee = str(data.get("annee", ""))
 
+        # Le nouveau template (Contrat_Lili) gère nativement :
+        # - la mise en forme de la zone signature (gras + souligné, alignement)
+        # - les marges (top 15mm, bottom 12mm, footer 6mm)
+        # - l'espacement entre articles
+        # On se contente donc de remplacer les placeholders.
         replacements = {
-            "/2019": f"/{annee}" if annee else "/2019",
+            "/2026": f"/{annee}" if annee else "/2026",
             "AAAA": data.get("nom_enseignant", ""),
-            "MOUKHTAR HASSAN MAHAMAT": data.get("nom_enseignant", ""),
             "BBBB": grade,
             "CCCC": data.get("annee_academique", ""),
             "Dr HAGGAR BACHAR SALIM": data.get("directeur_general") or "Dr HAGGAR BACHAR SALIM",
@@ -454,19 +519,6 @@ class ContractGenerator:
         for paragraph in doc.paragraphs:
             for old, new in replacements.items():
                 self._replace_in_paragraph(paragraph, old, new)
-
-        # Reformater la zone de signature (Vacataire | Directeur Général)
-        # pour garantir alignement sur une seule ligne, DG en retrait du bord droit
-        vacataire_name = data.get("nom_enseignant", "")
-        dg_name = data.get("directeur_general") or "Dr HAGGAR BACHAR SALIM"
-        self._fix_signature_layout(doc, vacataire_name, dg_name)
-
-        # Resserrer l'espace entre la fin de l'Article 4 et l'Article 5
-        self._tighten_spacing_around_articles(doc)
-
-        # Marges resserrées en bas pour garder le QR sur la même page
-        # (marge basse 1,2 cm, pied de page 0,6 cm)
-        self._set_bottom_margin(doc, 1.2, footer_cm=0.6)
 
         ecues = data.get("ecues", [])
         for table in doc.tables:
@@ -487,6 +539,8 @@ class ContractGenerator:
 
         verification_hash = self._hash_contract(data, contract_uuid)
         qr_image = self._build_qr_image(data, contract_uuid, verification_hash)
+        # Supprimer le QR du template avant d'ajouter le nouveau
+        self._remove_existing_qr_codes(doc)
         self._embed_qr_code(doc, qr_image)
 
         docx_path = os.path.join(self.output_folder, secure_filename)

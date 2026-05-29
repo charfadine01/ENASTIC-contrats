@@ -27,7 +27,7 @@ DEFAULT_SETTINGS: list[dict] = [
     },
     {
         "key": "annee_academique_defaut",
-        "value": "2026/2027",
+        "value": "2025-2026",
         "label": "Année académique par défaut",
         "description": "Pré-remplit le champ année académique dans le formulaire de nouveau contrat.",
     },
@@ -42,6 +42,12 @@ DEFAULT_SETTINGS: list[dict] = [
         "value": "Ecole Nationale Supérieure des Technologies de l'Information et de la Communication",
         "label": "Libellé complet de l'établissement",
         "description": "Utilisé dans la zone de signature des contrats.",
+    },
+    {
+        "key": "dossier_telechargement_defaut",
+        "value": "",
+        "label": "Dossier de téléchargement par défaut",
+        "description": "Chemin où les contrats téléchargés sont enregistrés directement (laisser vide pour utiliser le dossier Téléchargements du système). Le bouton « Télécharger sous… » permet toujours de choisir un autre emplacement à la volée.",
     },
 ]
 

@@ -76,6 +76,31 @@ def generate_contract(
     )
 
 
+@router.get("/{contract_id}/full")
+def get_contract_full(
+    contract_id: int,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+) -> dict:
+    """Retourne le contrat avec les metadata (ECUEs, DG, arrêté) pour pré-remplir
+    le formulaire lors d'une édition."""
+    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contrat introuvable")
+    if current.role != "admin" and contract.user_id != current.id:
+        raise HTTPException(status_code=403, detail="Accès refusé")
+    return {
+        "id": contract.id,
+        "uuid": contract.uuid,
+        "teacher_name": contract.teacher_name,
+        "teacher_grade": contract.teacher_grade,
+        "academic_year": contract.academic_year,
+        "year": contract.year,
+        "ecue_count": contract.ecue_count,
+        "metadata": contract.contract_metadata or {},
+    }
+
+
 @router.get("", response_model=list[ContractOut])
 def list_contracts(
     db: Session = Depends(get_db),

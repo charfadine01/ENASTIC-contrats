@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
-import { Save } from "lucide-react";
+import { FolderOpen, Save } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@/lib/api";
 import type { Setting } from "@/lib/types";
+
+function inTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
 
 export default function Settings() {
   const [settings, setSettings] = useState<Setting[]>([]);
@@ -41,6 +46,17 @@ export default function Settings() {
     return value.length > 50;
   }
 
+  async function pickDirectory(key: string) {
+    if (!inTauri()) {
+      alert("La sélection de dossier n'est disponible que dans l'application desktop.");
+      return;
+    }
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected === "string") {
+      setValues((p) => ({ ...p, [key]: selected }));
+    }
+  }
+
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <h2 className="text-2xl font-bold text-gray-900 mb-1">Paramètres de l'application</h2>
@@ -75,7 +91,24 @@ export default function Settings() {
                 </button>
               </div>
             </div>
-            {isLongValue(s.value) ? (
+            {s.key === "dossier_telechargement_defaut" ? (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={values[s.key] ?? ""}
+                  onChange={(e) => setValues((p) => ({ ...p, [s.key]: e.target.value }))}
+                  placeholder="Laisser vide pour utiliser Téléchargements"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-enastic-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => pickDirectory(s.key)}
+                  className="flex items-center gap-1 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-2 rounded text-sm"
+                >
+                  <FolderOpen size={14} /> Parcourir
+                </button>
+              </div>
+            ) : isLongValue(s.value) ? (
               <textarea
                 value={values[s.key] ?? ""}
                 onChange={(e) => setValues((p) => ({ ...p, [s.key]: e.target.value }))}

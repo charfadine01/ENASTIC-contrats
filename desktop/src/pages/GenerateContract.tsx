@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, Download, BookOpen } from "lucide-react";
-import { api, API_BASE_URL } from "@/lib/api";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Plus, Trash2, Download, FolderDown, Printer, BookOpen } from "lucide-react";
+import { api } from "@/lib/api";
+import { downloadContract, printContract } from "@/lib/download";
 import {
   DEFAULT_NIVEAUX,
   DEFAULT_SEMESTRES,
@@ -31,11 +33,16 @@ function emptyEcue(): EcueInput {
 const currentYear = new Date().getFullYear();
 
 export default function GenerateContract() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const editContractId = (location.state as { editContractId?: number } | null)?.editContractId;
+  const [editingId, setEditingId] = useState<number | null>(editContractId ?? null);
+
   const [form, setForm] = useState<ContractGenerateRequest>({
     nom_enseignant: "",
     grade: "Maître Assistant",
     annee: currentYear,
-    annee_academique: `${currentYear}/${currentYear + 1}`,
+    annee_academique: `${currentYear}-${currentYear + 1}`,
     ecues: [emptyEcue()],
   });
   const [submitting, setSubmitting] = useState(false);
@@ -48,7 +55,10 @@ export default function GenerateContract() {
   const [classes, setClasses] = useState<Classe[]>([]);
   const [semestres, setSemestres] = useState<Semestre[]>([]);
   const [ecuesDb, setEcuesDb] = useState<Ecue[]>([]);
+  const [defaultDir, setDefaultDir] = useState<string>("");
   const [pickerOpen, setPickerOpen] = useState<number | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -66,11 +76,52 @@ export default function GenerateContract() {
       setEcuesDb(ec.data);
       // Pré-remplir l'année académique depuis les paramètres si défini
       const annee = st.data.find((x) => x.key === "annee_academique_defaut")?.value;
-      if (annee && /^\d{4}\/\d{4}$/.test(annee)) {
+      if (annee && /^\d{4}-\d{4}$/.test(annee)) {
         setForm((prev) => ({ ...prev, annee_academique: annee }));
       }
+      // Dossier de téléchargement par défaut
+      const dir = st.data.find((x) => x.key === "dossier_telechargement_defaut")?.value;
+      if (dir) setDefaultDir(dir);
     });
   }, []);
+
+  // Charger un contrat existant pour édition
+  useEffect(() => {
+    if (!editContractId) return;
+    api
+      .get<{
+        teacher_name: string;
+        teacher_grade: string;
+        academic_year: string;
+        year: number;
+        metadata: {
+          ecues?: EcueInput[];
+          directeur_general?: string | null;
+          arrete?: string | null;
+        };
+      }>(`/contracts/${editContractId}/full`)
+      .then((res) => {
+        const c = res.data;
+        // Normaliser format année (slash -> tiret)
+        const year = (c.academic_year || "").replace("/", "-");
+        setForm({
+          nom_enseignant: c.teacher_name,
+          grade: c.teacher_grade,
+          annee: c.year,
+          annee_academique: year || `${currentYear}-${currentYear + 1}`,
+          ecues:
+            c.metadata?.ecues && c.metadata.ecues.length > 0
+              ? c.metadata.ecues
+              : [emptyEcue()],
+        });
+        setEditingId(editContractId);
+        // Nettoyer le state de navigation pour ne pas recharger en boucle
+        navigate(".", { replace: true, state: null });
+      })
+      .catch(() => {
+        // ignore : on reste sur un formulaire vierge
+      });
+  }, [editContractId, navigate]);
 
   const niveauOptions = niveaux.length > 0 ? niveaux.map((n) => n.nom) : [...DEFAULT_NIVEAUX];
   const semestreOptions =
@@ -133,6 +184,15 @@ export default function GenerateContract() {
     try {
       const res = await api.post<ContractGenerateResponse>("/contracts/generate", form);
       setResult(res.data);
+      // Si on était en mode édition : supprimer l'ancien contrat
+      if (editingId !== null) {
+        try {
+          await api.delete(`/contracts/${editingId}`);
+        } catch {
+          /* ignore */
+        }
+        setEditingId(null);
+      }
     } catch (err: any) {
       const detail = err?.response?.data?.detail;
       setError(typeof detail === "string" ? detail : "Erreur lors de la génération");
@@ -141,28 +201,69 @@ export default function GenerateContract() {
     }
   }
 
-  async function downloadContract(format: "docx" | "pdf") {
+  function showToast(message: string) {
+    setToast(message);
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  function fileName(format: "docx" | "pdf"): string {
+    if (!result) return `contrat.${format}`;
+    const teacher = result.contract.teacher_name.replace(/\s/g, "_");
+    const year = result.contract.academic_year.replace("/", "-");
+    return `Contrat_${teacher}_${year}.${format}`;
+  }
+
+  async function handleDownload(format: "docx" | "pdf", saveAs: boolean) {
     if (!result) return;
-    const url =
-      format === "pdf"
-        ? `${API_BASE_URL}${result.pdf_download_url}`
-        : `${API_BASE_URL}${result.download_url}`;
-    const token = localStorage.getItem("enastic_token");
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const blob = await response.blob();
-    const dlUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = dlUrl;
-    a.download = `Contrat_${result.contract.teacher_name.replace(/\s/g, "_")}.${format}`;
-    a.click();
-    URL.revokeObjectURL(dlUrl);
+    setBusy(saveAs ? `as-${format}` : `dl-${format}`);
+    try {
+      const downloadUrl =
+        format === "pdf" ? result.pdf_download_url ?? "" : result.download_url;
+      if (!downloadUrl) {
+        showToast("PDF non disponible");
+        return;
+      }
+      const path = await downloadContract({
+        downloadUrl,
+        filename: fileName(format),
+        format,
+        defaultDir: defaultDir || undefined,
+        saveAs,
+      });
+      if (path) showToast(`Enregistré : ${path}`);
+    } catch (err: any) {
+      showToast(err?.message ?? "Erreur de téléchargement");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handlePrint() {
+    if (!result?.pdf_download_url) {
+      showToast("PDF non disponible pour impression");
+      return;
+    }
+    setBusy("print");
+    try {
+      await printContract(result.pdf_download_url, fileName("pdf"), defaultDir || undefined);
+      showToast("PDF ouvert : utilisez ⌘P / Ctrl+P pour imprimer");
+    } catch (err: any) {
+      showToast(err?.message ?? "Erreur d'impression");
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
-      <h2 className="text-2xl font-bold text-gray-900 mb-1">Nouveau contrat de vacation</h2>
+      <h2 className="text-2xl font-bold text-gray-900 mb-1">
+        {editingId !== null ? "Modifier le contrat" : "Nouveau contrat de vacation"}
+      </h2>
+      {editingId !== null && (
+        <div className="mb-4 text-xs bg-blue-50 border border-blue-200 rounded px-3 py-2 text-blue-700">
+          Vous modifiez un contrat existant. À la génération, l'ancienne version sera remplacée.
+        </div>
+      )}
       <p className="text-sm text-gray-500 mb-6">
         Remplissez les informations puis générez le document Word et PDF.
       </p>
@@ -234,22 +335,19 @@ export default function GenerateContract() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Année académique * (AAAA/AAAA)
+                Année académique * (AAAA-AAAA)
               </label>
               <input
                 type="text"
                 required
-                pattern="\d{4}/\d{4}"
+                pattern="\d{4}-\d{4}"
+                placeholder="2025-2026"
                 value={form.annee_academique}
                 onChange={(e) => updateField("annee_academique", e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-enastic-500"
               />
             </div>
           </div>
-          <p className="text-xs text-gray-500 mt-4">
-            Le nom du Directeur Général et le numéro de l'arrêté sont configurés dans la page
-            <b> Paramètres</b> (admin).
-          </p>
         </section>
 
         <section className="bg-white rounded-xl border border-gray-200 p-6">
@@ -293,27 +391,81 @@ export default function GenerateContract() {
 
         {result && (
           <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <div className="font-medium text-green-800 mb-2">
-              Contrat généré avec succès
+            <div className="font-medium text-green-800 mb-3">
+              ✓ Contrat généré avec succès
             </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => downloadContract("docx")}
-                className="flex items-center gap-1 bg-white border border-green-300 text-green-700 px-3 py-1.5 rounded text-sm hover:bg-green-100"
-              >
-                <Download size={14} /> Télécharger .docx
-              </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Bloc PDF */}
               {result.pdf_download_url && (
-                <button
-                  type="button"
-                  onClick={() => downloadContract("pdf")}
-                  className="flex items-center gap-1 bg-white border border-green-300 text-green-700 px-3 py-1.5 rounded text-sm hover:bg-green-100"
-                >
-                  <Download size={14} /> Télécharger .pdf
-                </button>
+                <div className="bg-white border border-green-200 rounded p-3">
+                  <div className="text-xs font-semibold text-gray-700 mb-2">PDF</div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={handlePrint}
+                      className="flex items-center gap-1 bg-enastic-500 hover:bg-enastic-600 disabled:bg-gray-300 text-white px-3 py-1.5 rounded text-sm"
+                    >
+                      <Printer size={14} /> {busy === "print" ? "..." : "Imprimer"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => handleDownload("pdf", false)}
+                      className="flex items-center gap-1 bg-white border border-green-300 text-green-700 px-3 py-1.5 rounded text-sm hover:bg-green-100 disabled:opacity-50"
+                      title={defaultDir ? `Vers ${defaultDir}` : "Vers Téléchargements"}
+                    >
+                      <Download size={14} /> {busy === "dl-pdf" ? "..." : "Télécharger"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => handleDownload("pdf", true)}
+                      className="flex items-center gap-1 bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      <FolderDown size={14} />
+                      {busy === "as-pdf" ? "..." : "Enregistrer sous…"}
+                    </button>
+                  </div>
+                </div>
               )}
+
+              {/* Bloc DOCX */}
+              <div className="bg-white border border-green-200 rounded p-3">
+                <div className="text-xs font-semibold text-gray-700 mb-2">Word (.docx)</div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => handleDownload("docx", false)}
+                    className="flex items-center gap-1 bg-white border border-green-300 text-green-700 px-3 py-1.5 rounded text-sm hover:bg-green-100 disabled:opacity-50"
+                    title={defaultDir ? `Vers ${defaultDir}` : "Vers Téléchargements"}
+                  >
+                    <Download size={14} /> {busy === "dl-docx" ? "..." : "Télécharger"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => handleDownload("docx", true)}
+                    className="flex items-center gap-1 bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    <FolderDown size={14} />
+                    {busy === "as-docx" ? "..." : "Enregistrer sous…"}
+                  </button>
+                </div>
+              </div>
             </div>
+            {toast && (
+              <div className="mt-3 text-xs bg-white border border-green-200 rounded px-3 py-2 text-gray-700">
+                {toast}
+              </div>
+            )}
+            {!defaultDir && (
+              <div className="mt-3 text-xs text-gray-500">
+                💡 Astuce : configurez un <b>dossier de téléchargement par défaut</b> dans
+                Paramètres pour éviter le dialog à chaque fois.
+              </div>
+            )}
           </div>
         )}
 
@@ -323,7 +475,11 @@ export default function GenerateContract() {
             disabled={submitting}
             className="bg-enastic-500 hover:bg-enastic-600 disabled:bg-gray-300 text-white font-medium px-6 py-2.5 rounded-lg"
           >
-            {submitting ? "Génération en cours..." : "Générer le contrat"}
+            {submitting
+              ? "Génération en cours..."
+              : editingId !== null
+                ? "Régénérer le contrat"
+                : "Générer le contrat"}
           </button>
         </div>
       </form>
