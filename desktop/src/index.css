@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@theme {
+  --color-enastic-50: #eef4fb;
+  --color-enastic-100: #d9e6f5;
+  --color-enastic-500: #1e3c72;
+  --color-enastic-600: #18305c;
+  --color-enastic-700: #122446;
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: #f7f8fb;
+  color: #1f2937;
+}
+
+button { cursor: pointer; }

@@ -1,0 +1,119 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: macos-arm
+            os: macos-14
+            rust-target: aarch64-apple-darwin
+            pyinstaller-suffix: aarch64-apple-darwin
+            tauri-args: "--target aarch64-apple-darwin"
+          - name: macos-intel
+            os: macos-13
+            rust-target: x86_64-apple-darwin
+            pyinstaller-suffix: x86_64-apple-darwin
+            tauri-args: "--target x86_64-apple-darwin"
+          - name: windows
+            os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            pyinstaller-suffix: x86_64-pc-windows-msvc
+            tauri-args: ""
+          - name: linux
+            os: ubuntu-22.04
+            rust-target: x86_64-unknown-linux-gnu
+            pyinstaller-suffix: x86_64-unknown-linux-gnu
+            tauri-args: ""
+
+    runs-on: ${{ matrix.platform.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system deps
+        if: matrix.platform.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.rust-target }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./desktop/src-tauri -> target"
+
+      - name: Build API sidecar with PyInstaller
+        working-directory: api
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+          pyinstaller --clean --noconfirm enastic-api.spec
+          mkdir -p ../desktop/src-tauri/binaries
+          # Renommer le binaire avec le suffixe de la target Rust
+          if [ "${{ matrix.platform.os }}" = "windows-latest" ]; then
+            cp dist/enastic-api.exe ../desktop/src-tauri/binaries/enastic-api-${{ matrix.platform.pyinstaller-suffix }}.exe
+          else
+            cp dist/enastic-api ../desktop/src-tauri/binaries/enastic-api-${{ matrix.platform.pyinstaller-suffix }}
+            chmod +x ../desktop/src-tauri/binaries/enastic-api-${{ matrix.platform.pyinstaller-suffix }}
+          fi
+
+      - name: Install frontend deps
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build Tauri app
+        working-directory: desktop
+        run: npx tauri build ${{ matrix.platform.tauri-args }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: enastic-${{ matrix.platform.name }}
+          path: |
+            desktop/src-tauri/target/**/release/bundle/dmg/*.dmg
+            desktop/src-tauri/target/**/release/bundle/msi/*.msi
+            desktop/src-tauri/target/**/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/**/release/bundle/appimage/*.AppImage
+            desktop/src-tauri/target/**/release/bundle/deb/*.deb
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

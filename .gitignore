@@ -1,0 +1,66 @@
+# ─── Python (api/) ────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# PyInstaller
+api/build/
+api/dist/
+api/*.spec.bak
+
+# ─── Node / Vite / Tauri (desktop/) ───────────────────────────────────────────
+node_modules/
+desktop/dist/
+desktop/dist-ssr/
+*.local
+
+# Tauri / Rust
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/binaries/enastic-api-*
+
+# ─── Databases & generated files ──────────────────────────────────────────────
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+api/enastic_dev.db
+api/test_smoke.db
+api/contrats_generes/
+api/temp_contracts/
+api/instance/
+api/logs/
+
+# ─── Env / secrets ────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ─── Editor / OS ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ─── Build outputs ────────────────────────────────────────────────────────────
+*.dmg
+*.exe
+*.msi
+*.deb
+*.AppImage
+*.app/
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
