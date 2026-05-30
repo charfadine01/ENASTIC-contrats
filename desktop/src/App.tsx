@@ -9,6 +9,7 @@ import Users from "@/pages/Users";
 import Profile from "@/pages/Profile";
 import Settings from "@/pages/Settings";
 import Splash from "@/pages/Splash";
+import UpdateBanner from "@/components/UpdateBanner";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading, apiStatus } = useAuth();
@@ -43,6 +44,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <AuthProvider>
+      <UpdateBanner />
       <BrowserRouter>
         <Routes>
           <Route

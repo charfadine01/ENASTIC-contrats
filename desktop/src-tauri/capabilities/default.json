@@ -31,6 +31,9 @@
     "fs:allow-write-file",
     "fs:allow-mkdir",
     "fs:allow-exists",
+    "updater:default",
+    "process:default",
+    "process:allow-restart",
     {
       "identifier": "fs:scope",
       "allow": [

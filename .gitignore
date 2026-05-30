@@ -64,3 +64,14 @@ Thumbs.db
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 logs/
+
+# Artefacts GitHub téléchargés localement
+enastic-macos-arm.zip
+enastic-macos-intel.zip
+enastic-windows.zip
+enastic-linux.zip
+aarch64-apple-darwin/
+x86_64-apple-darwin/
+x86_64-pc-windows-msvc/
+x86_64-unknown-linux-gnu/
+
