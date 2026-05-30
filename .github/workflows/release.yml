@@ -42,7 +42,15 @@ jobs:
         if: matrix.platform.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -82,7 +90,7 @@ jobs:
 
       - name: Install frontend deps
         working-directory: desktop
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Build Tauri app
         working-directory: desktop
