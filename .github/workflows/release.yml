@@ -149,9 +149,13 @@ jobs:
 
           # --- Windows x64 : sur ce CLI Tauri, l'artefact updater est l'installeur
           #     NSIS lui-même (*-setup.exe) + sa signature (*-setup.exe.sig).
-          #     Repli sur *.msi + *.msi.sig si besoin. ---
-          WIN_X64_SIG=$(find artifacts \( -name "*-setup.exe.sig" -o -name "*.msi.sig" \) | head -1)
-          WIN_X64_FILE=$(find artifacts \( -name "*-setup.exe" -o -name "*.msi" \) ! -name "*.sig" | head -1 | xargs -I{} basename {} 2>/dev/null || true)
+          #     On PRIVILÉGIE NSIS (cohérent avec l'install initiale) ; repli MSI sinon.
+          WIN_X64_FILE=$(find artifacts -name "*-setup.exe" ! -name "*.sig" | head -1 | xargs -I{} basename {} 2>/dev/null || true)
+          WIN_X64_SIG=$(find artifacts -name "*-setup.exe.sig" | head -1)
+          if [ -z "$WIN_X64_FILE" ]; then
+            WIN_X64_FILE=$(find artifacts -name "*.msi" ! -name "*.sig" | head -1 | xargs -I{} basename {} 2>/dev/null || true)
+            WIN_X64_SIG=$(find artifacts -name "*.msi.sig" | head -1)
+          fi
 
           # Construit dynamiquement les blocs de plateforme uniquement si les fichiers existent
           PLATFORMS=""
