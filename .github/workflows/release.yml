@@ -73,24 +73,40 @@ jobs:
         working-directory: desktop
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # Clé sans mot de passe : on définit la variable vide pour que le CLI
+          # signe les artefacts updater de manière non-interactive (utile sur Windows).
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: npx tauri build ${{ matrix.platform.tauri-args }}
+
+      - name: Diagnostic — lister les bundles produits
+        working-directory: desktop
+        shell: bash
+        run: |
+          echo "=== Contenu de src-tauri/target/**/release/bundle ==="
+          find src-tauri/target -path "*/release/bundle/*" -type f 2>/dev/null | sort || true
+          echo "=== .sig produits ==="
+          find src-tauri/target -path "*/release/*" -name "*.sig" 2>/dev/null | sort || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: enastic-${{ matrix.platform.name }}
+          if-no-files-found: warn
+          # Deux variantes de chemin :
+          #  - macOS build avec --target  -> target/<triple>/release/bundle/...
+          #  - Windows build sans --target -> target/release/bundle/...
+          # Le glob target/**/ n'attrape PAS de façon fiable le cas "zéro segment"
+          # (Windows), d'où l'ajout des chemins target/release/bundle/... explicites.
           path: |
-            desktop/src-tauri/target/**/release/bundle/dmg/*.dmg
-            desktop/src-tauri/target/**/release/bundle/msi/*.msi
-            desktop/src-tauri/target/**/release/bundle/nsis/*.exe
-            desktop/src-tauri/target/**/release/bundle/appimage/*.AppImage
-            desktop/src-tauri/target/**/release/bundle/deb/*.deb
-            desktop/src-tauri/target/**/release/bundle/macos/*.app.tar.gz
-            desktop/src-tauri/target/**/release/bundle/macos/*.app.tar.gz.sig
-            desktop/src-tauri/target/**/release/bundle/nsis/*.nsis.zip
-            desktop/src-tauri/target/**/release/bundle/nsis/*.nsis.zip.sig
-            desktop/src-tauri/target/**/release/bundle/msi/*.msi.zip
-            desktop/src-tauri/target/**/release/bundle/msi/*.msi.zip.sig
+            desktop/src-tauri/target/*/release/bundle/dmg/*.dmg
+            desktop/src-tauri/target/*/release/bundle/macos/*.app.tar.gz
+            desktop/src-tauri/target/*/release/bundle/macos/*.app.tar.gz.sig
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+            desktop/src-tauri/target/release/bundle/msi/*.msi.zip
+            desktop/src-tauri/target/release/bundle/msi/*.msi.zip.sig
+            desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip
+            desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip.sig
 
   release:
     name: Create GitHub Release
