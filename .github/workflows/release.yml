@@ -109,60 +109,75 @@ jobs:
 
       - name: Generate latest.json for auto-updater
         run: |
+          set -euo pipefail
           VERSION="${GITHUB_REF#refs/tags/v}"
           PUBDATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}"
 
-          # Lire les signatures (.sig sont des fichiers texte avec la signature minisign)
+          echo "=== DIAGNOSTIC : tous les artefacts téléchargés ==="
+          find artifacts -type f | sort
+          echo "=== DIAGNOSTIC : fichiers .sig trouvés ==="
+          find artifacts -name "*.sig" | sort
+          echo "==============================================="
+
+          # Lit le contenu d'un .sig (signature minisign sur une ligne)
           read_sig() {
             local f="$1"
-            if [ -f "$f" ]; then
-              cat "$f"
-            else
-              echo ""
-            fi
+            [ -n "$f" ] && [ -f "$f" ] && tr -d '\n' < "$f" || echo ""
           }
 
-          # Trouver les fichiers .sig produits par Tauri pour chaque plateforme
-          MACOS_ARM_SIG=$(find artifacts -name "*aarch64*.app.tar.gz.sig" | head -1)
-          MACOS_X64_SIG=$(find artifacts -name "*x64*.app.tar.gz.sig" -o -name "*x86_64*.app.tar.gz.sig" | head -1)
-          WIN_X64_SIG=$(find artifacts -name "*.nsis.zip.sig" -o -name "*.msi.zip.sig" | head -1)
-          LINUX_SIG=$(find artifacts -name "*.AppImage.tar.gz.sig" -o -name "*amd64.AppImage.sig" | head -1)
+          # URL-encode les espaces (Tauri nomme parfois les bundles avec des espaces)
+          urlenc() { echo "$1" | sed 's/ /%20/g'; }
 
-          # Trouver les noms de fichiers correspondants (sans .sig)
-          MACOS_ARM_FILE=$(find artifacts -name "*aarch64*.app.tar.gz" ! -name "*.sig" | head -1 | xargs -I{} basename {})
-          MACOS_X64_FILE=$(find artifacts \( -name "*x64*.app.tar.gz" -o -name "*x86_64*.app.tar.gz" \) ! -name "*.sig" | head -1 | xargs -I{} basename {})
-          WIN_X64_FILE=$(find artifacts \( -name "*.nsis.zip" -o -name "*.msi.zip" \) ! -name "*.sig" | head -1 | xargs -I{} basename {})
-          LINUX_FILE=$(find artifacts \( -name "*.AppImage.tar.gz" -o -name "*amd64.AppImage" \) ! -name "*.sig" | head -1 | xargs -I{} basename {})
+          # --- macOS arm64 : l'archive updater est *.app.tar.gz (suffixe aarch64 absent du nom) ---
+          MACOS_ARM_SIG=$(find artifacts -name "*.app.tar.gz.sig" | head -1)
+          MACOS_ARM_FILE=$(find artifacts -name "*.app.tar.gz" ! -name "*.sig" | head -1 | xargs -I{} basename {} 2>/dev/null || true)
+
+          # --- Windows x64 : bundle updater NSIS (*.nsis.zip), repli sur *.msi.zip ---
+          WIN_X64_SIG=$(find artifacts \( -name "*.nsis.zip.sig" -o -name "*.msi.zip.sig" \) | head -1)
+          WIN_X64_FILE=$(find artifacts \( -name "*.nsis.zip" -o -name "*.msi.zip" \) ! -name "*.sig" | head -1 | xargs -I{} basename {} 2>/dev/null || true)
+
+          # Construit dynamiquement les blocs de plateforme uniquement si les fichiers existent
+          PLATFORMS=""
+          add_platform() {
+            local key="$1" file="$2" sigfile="$3"
+            if [ -z "$file" ]; then
+              echo "::warning::Plateforme $key ignorée — aucun fichier updater trouvé."
+              return
+            fi
+            local sig; sig=$(read_sig "$sigfile")
+            if [ -z "$sig" ]; then
+              echo "::warning::Plateforme $key — signature absente ($sigfile). L'updater refusera ce paquet."
+            fi
+            [ -n "$PLATFORMS" ] && PLATFORMS="${PLATFORMS},"
+            PLATFORMS="${PLATFORMS}
+              \"${key}\": {
+                \"signature\": \"${sig}\",
+                \"url\": \"${BASE_URL}/$(urlenc "$file")\"
+              }"
+          }
+
+          add_platform "darwin-aarch64" "$MACOS_ARM_FILE" "$MACOS_ARM_SIG"
+          add_platform "windows-x86_64" "$WIN_X64_FILE" "$WIN_X64_SIG"
 
           cat > artifacts/latest.json <<EOF
           {
             "version": "${VERSION}",
             "notes": "Voir les notes de version sur GitHub.",
             "pub_date": "${PUBDATE}",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "$(read_sig "${MACOS_ARM_SIG}")",
-                "url": "${BASE_URL}/${MACOS_ARM_FILE}"
-              },
-              "darwin-x86_64": {
-                "signature": "$(read_sig "${MACOS_X64_SIG}")",
-                "url": "${BASE_URL}/${MACOS_X64_FILE}"
-              },
-              "windows-x86_64": {
-                "signature": "$(read_sig "${WIN_X64_SIG}")",
-                "url": "${BASE_URL}/${WIN_X64_FILE}"
-              },
-              "linux-x86_64": {
-                "signature": "$(read_sig "${LINUX_SIG}")",
-                "url": "${BASE_URL}/${LINUX_FILE}"
-              }
+            "platforms": {${PLATFORMS}
             }
           }
           EOF
 
           echo "=== latest.json généré ==="
           cat artifacts/latest.json
+
+          # Échec dur si aucune plateforme n'a pu être renseignée
+          if [ -z "$PLATFORMS" ]; then
+            echo "::error::latest.json vide — aucun artefact updater trouvé. Vérifier createUpdaterArtifacts et la signature."
+            exit 1
+          fi
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
