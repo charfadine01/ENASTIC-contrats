@@ -102,11 +102,9 @@ jobs:
             desktop/src-tauri/target/*/release/bundle/macos/*.app.tar.gz
             desktop/src-tauri/target/*/release/bundle/macos/*.app.tar.gz.sig
             desktop/src-tauri/target/release/bundle/msi/*.msi
-            desktop/src-tauri/target/release/bundle/msi/*.msi.zip
-            desktop/src-tauri/target/release/bundle/msi/*.msi.zip.sig
+            desktop/src-tauri/target/release/bundle/msi/*.msi.sig
             desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
-            desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip
-            desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip.sig
+            desktop/src-tauri/target/release/bundle/nsis/*-setup.exe.sig
 
   release:
     name: Create GitHub Release
@@ -149,9 +147,11 @@ jobs:
           MACOS_ARM_SIG=$(find artifacts -name "*.app.tar.gz.sig" | head -1)
           MACOS_ARM_FILE=$(find artifacts -name "*.app.tar.gz" ! -name "*.sig" | head -1 | xargs -I{} basename {} 2>/dev/null || true)
 
-          # --- Windows x64 : bundle updater NSIS (*.nsis.zip), repli sur *.msi.zip ---
-          WIN_X64_SIG=$(find artifacts \( -name "*.nsis.zip.sig" -o -name "*.msi.zip.sig" \) | head -1)
-          WIN_X64_FILE=$(find artifacts \( -name "*.nsis.zip" -o -name "*.msi.zip" \) ! -name "*.sig" | head -1 | xargs -I{} basename {} 2>/dev/null || true)
+          # --- Windows x64 : sur ce CLI Tauri, l'artefact updater est l'installeur
+          #     NSIS lui-même (*-setup.exe) + sa signature (*-setup.exe.sig).
+          #     Repli sur *.msi + *.msi.sig si besoin. ---
+          WIN_X64_SIG=$(find artifacts \( -name "*-setup.exe.sig" -o -name "*.msi.sig" \) | head -1)
+          WIN_X64_FILE=$(find artifacts \( -name "*-setup.exe" -o -name "*.msi" \) ! -name "*.sig" | head -1 | xargs -I{} basename {} 2>/dev/null || true)
 
           # Construit dynamiquement les blocs de plateforme uniquement si les fichiers existent
           PLATFORMS=""
