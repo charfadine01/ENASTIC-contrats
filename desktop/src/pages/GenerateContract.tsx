@@ -60,6 +60,10 @@ export default function GenerateContract() {
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Chargement rapide en cascade : Niveau → Classe → ECUEs de la classe
+  const [quickNiveauId, setQuickNiveauId] = useState<number | "">("");
+  const [quickClasseId, setQuickClasseId] = useState<number | "">("");
+
   useEffect(() => {
     Promise.all([
       api.get<Enseignant[]>("/enseignants").catch(() => ({ data: [] as Enseignant[] })),
@@ -174,6 +178,50 @@ export default function GenerateContract() {
       semestre: semestre?.nom ?? "Semestre 1",
     });
     setPickerOpen(null);
+  }
+
+  // Classes du niveau sélectionné (cascade Niveau → Classe)
+  const quickClasses = useMemo(
+    () => (quickNiveauId === "" ? [] : classes.filter((c) => c.niveau_id === quickNiveauId)),
+    [classes, quickNiveauId],
+  );
+
+  // Convertit un Ecue (BDD) en EcueInput (formulaire), avec ses libellés résolus
+  function ecueDbToInput(e: Ecue): EcueInput {
+    const classe = classes.find((c) => c.id === e.classe_id);
+    const niveau = classe ? niveaux.find((n) => n.id === classe.niveau_id) : undefined;
+    const semestre = semestres.find((s) => s.id === e.semestre_id);
+    return {
+      intitule: e.intitule,
+      heures_cm: e.heures_cm_defaut,
+      heures_td: e.heures_td_defaut,
+      heures_tp: e.heures_tp_defaut,
+      niveau: niveau?.nom ?? "L1",
+      classe: classe?.nom ?? "",
+      semestre: semestre?.nom ?? "Semestre 1",
+    };
+  }
+
+  // Charge en bloc toutes les ECUEs de la classe sélectionnée dans le formulaire
+  function loadEcuesOfClasse() {
+    if (quickClasseId === "") return;
+    const matching = ecuesDb.filter((e) => e.classe_id === quickClasseId);
+    if (matching.length === 0) {
+      showToast("Aucune ECUE enregistrée pour cette classe.");
+      return;
+    }
+    const rows = matching.map(ecueDbToInput);
+    setForm((prev) => {
+      // Si la seule ligne existante est vide, on la remplace ; sinon on ajoute à la suite.
+      const existing =
+        prev.ecues.length === 1 && prev.ecues[0].intitule.trim() === "" ? [] : prev.ecues;
+      // Évite les doublons d'intitulé déjà présents
+      const seen = new Set(existing.map((e) => e.intitule.trim().toLowerCase()));
+      const toAdd = rows.filter((r) => !seen.has(r.intitule.trim().toLowerCase()));
+      return { ...prev, ecues: [...existing, ...toAdd] };
+    });
+    const classeNom = classes.find((c) => c.id === quickClasseId)?.nom ?? "";
+    showToast(`${matching.length} ECUE(s) de « ${classeNom} » chargée(s).`);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -361,6 +409,74 @@ export default function GenerateContract() {
               <Plus size={14} /> Ajouter
             </button>
           </div>
+
+          {/* Chargement rapide en cascade : Niveau → Classe → ECUEs de la classe */}
+          {niveaux.length > 0 && (
+            <div className="mb-4 bg-enastic-50 border border-enastic-100 rounded-lg p-3">
+              <div className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                <BookOpen size={14} /> Chargement rapide par classe
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex-1 min-w-[120px]">
+                  <label className="block text-xs text-gray-600 mb-1">Niveau</label>
+                  <select
+                    value={quickNiveauId}
+                    onChange={(e) => {
+                      setQuickNiveauId(e.target.value ? Number(e.target.value) : "");
+                      setQuickClasseId("");
+                    }}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white"
+                  >
+                    <option value="">— Choisir —</option>
+                    {niveaux.map((n) => (
+                      <option key={n.id} value={n.id}>
+                        {n.nom}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex-1 min-w-[160px]">
+                  <label className="block text-xs text-gray-600 mb-1">Classe</label>
+                  <select
+                    value={quickClasseId}
+                    disabled={quickNiveauId === ""}
+                    onChange={(e) =>
+                      setQuickClasseId(e.target.value ? Number(e.target.value) : "")
+                    }
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white disabled:bg-gray-100 disabled:text-gray-400"
+                  >
+                    <option value="">
+                      {quickNiveauId === "" ? "— Choisir un niveau d'abord —" : "— Choisir —"}
+                    </option>
+                    {quickClasses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nom}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  disabled={quickClasseId === ""}
+                  onClick={loadEcuesOfClasse}
+                  className="flex items-center gap-1 text-sm bg-enastic-500 hover:bg-enastic-600 disabled:bg-gray-300 text-white px-3 py-1.5 rounded-lg whitespace-nowrap"
+                >
+                  <Plus size={14} /> Charger les ECUEs
+                </button>
+              </div>
+              {quickNiveauId !== "" && quickClasses.length === 0 && (
+                <p className="mt-2 text-xs text-amber-600">
+                  Aucune classe pour ce niveau. Ajoutez-en dans la section Académique.
+                </p>
+              )}
+              {toast && (
+                <div className="mt-2 text-xs bg-white border border-enastic-200 rounded px-2 py-1.5 text-gray-700">
+                  {toast}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="space-y-3">
             {form.ecues.map((ecue, idx) => (
               <EcueRow
@@ -533,6 +649,13 @@ function EcueRow({
     });
   }, [ecuesDb, classes, niveaux, semestres, ecue.niveau, ecue.classe, ecue.semestre]);
 
+  // Suggestions de classes limitées au niveau choisi pour cette ligne (cascade)
+  const classesForNiveau = useMemo(() => {
+    const selectedNiveau = niveaux.find((n) => n.nom === ecue.niveau);
+    if (!selectedNiveau) return classes;
+    return classes.filter((c) => c.niveau_id === selectedNiveau.id);
+  }, [classes, niveaux, ecue.niveau]);
+
   return (
     <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
       <div className="flex items-center justify-between mb-3">
@@ -624,8 +747,9 @@ function EcueRow({
             list={`classes-${index}`}
             className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
           />
+          {/* La liste de suggestions se limite aux classes du niveau choisi */}
           <datalist id={`classes-${index}`}>
-            {classes.map((c) => (
+            {classesForNiveau.map((c) => (
               <option key={c.id} value={c.nom} />
             ))}
           </datalist>
