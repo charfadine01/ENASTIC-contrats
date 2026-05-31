@@ -32,6 +32,20 @@ function emptyEcue(): EcueInput {
 
 const currentYear = new Date().getFullYear();
 
+/**
+ * Année académique en cours (format « AAAA-AAAA »).
+ * Une année académique va de septembre (année N) à août (année N+1).
+ * Avant septembre, on est donc encore dans l'année académique (N-1)-(N).
+ * Ex. : en mai 2026 → « 2025-2026 » ; en octobre 2026 → « 2026-2027 ».
+ */
+function currentAcademicYear(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  // getMonth() est 0-indexé : 8 = septembre.
+  const startYear = now.getMonth() >= 8 ? y : y - 1;
+  return `${startYear}-${startYear + 1}`;
+}
+
 export default function GenerateContract() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -42,7 +56,7 @@ export default function GenerateContract() {
     nom_enseignant: "",
     grade: "Maître Assistant",
     annee: currentYear,
-    annee_academique: `${currentYear}-${currentYear + 1}`,
+    annee_academique: currentAcademicYear(),
     ecues: [emptyEcue()],
   });
   const [submitting, setSubmitting] = useState(false);
@@ -112,7 +126,7 @@ export default function GenerateContract() {
           nom_enseignant: c.teacher_name,
           grade: c.teacher_grade,
           annee: c.year,
-          annee_academique: year || `${currentYear}-${currentYear + 1}`,
+          annee_academique: year || currentAcademicYear(),
           ecues:
             c.metadata?.ecues && c.metadata.ecues.length > 0
               ? c.metadata.ecues
