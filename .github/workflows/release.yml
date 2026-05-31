@@ -140,8 +140,12 @@ jobs:
             [ -n "$f" ] && [ -f "$f" ] && tr -d '\n' < "$f" || echo ""
           }
 
-          # URL-encode les espaces (Tauri nomme parfois les bundles avec des espaces)
-          urlenc() { echo "$1" | sed 's/ /%20/g'; }
+          # IMPORTANT : GitHub renomme les assets en remplaçant les espaces (et
+          # certains caractères spéciaux) par des POINTS lors de l'upload.
+          # Ex. "ENASTIC Contrats.app.tar.gz" -> "ENASTIC.Contrats.app.tar.gz".
+          # L'URL de téléchargement doit donc utiliser ce nom transformé, sinon
+          # l'updater obtient un 404 (espaces %20-encodés = fichier introuvable).
+          gh_asset_name() { echo "$1" | sed 's/ /./g'; }
 
           # --- macOS arm64 : l'archive updater est *.app.tar.gz (suffixe aarch64 absent du nom) ---
           MACOS_ARM_SIG=$(find artifacts -name "*.app.tar.gz.sig" | head -1)
@@ -173,7 +177,7 @@ jobs:
             PLATFORMS="${PLATFORMS}
               \"${key}\": {
                 \"signature\": \"${sig}\",
-                \"url\": \"${BASE_URL}/$(urlenc "$file")\"
+                \"url\": \"${BASE_URL}/$(gh_asset_name "$file")\"
               }"
           }
 
