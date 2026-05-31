@@ -261,8 +261,15 @@ function SemestresPanel() {
 
 function EcuesPanel() {
   const [items, setItems] = useState<Ecue[]>([]);
+  const [niveaux, setNiveaux] = useState<Niveau[]>([]);
   const [classes, setClasses] = useState<Classe[]>([]);
   const [semestres, setSemestres] = useState<Semestre[]>([]);
+
+  // Filtres « par classe » : Niveau → Classe → Semestre.
+  const [filtreNiveauId, setFiltreNiveauId] = useState<number | "">("");
+  const [filtreClasseId, setFiltreClasseId] = useState<number | "">("");
+  const [filtreSemestreId, setFiltreSemestreId] = useState<number | "">("");
+
   const [form, setForm] = useState({
     intitule: "",
     classe_id: 0,
@@ -273,12 +280,14 @@ function EcuesPanel() {
   });
 
   async function load() {
-    const [e, c, s] = await Promise.all([
+    const [e, n, c, s] = await Promise.all([
       api.get<Ecue[]>("/ecues"),
+      api.get<Niveau[]>("/niveaux"),
       api.get<Classe[]>("/classes"),
       api.get<Semestre[]>("/semestres"),
     ]);
     setItems(e.data);
+    setNiveaux(n.data);
     setClasses(c.data);
     setSemestres(s.data);
     setForm((prev) => ({
@@ -305,9 +314,113 @@ function EcuesPanel() {
 
   const classeName = (id: number) => classes.find((c) => c.id === id)?.nom ?? "—";
   const semestreName = (id: number) => semestres.find((s) => s.id === id)?.nom ?? "—";
+  const niveauIdOfClasse = (classeId: number) =>
+    classes.find((c) => c.id === classeId)?.niveau_id ?? 0;
+  const niveauNameOfClasse = (classeId: number) =>
+    niveaux.find((n) => n.id === niveauIdOfClasse(classeId))?.nom ?? "—";
+
+  // Classes disponibles selon le niveau choisi (pour le filtre ET le formulaire).
+  const classesDuNiveau =
+    filtreNiveauId === "" ? classes : classes.filter((c) => c.niveau_id === filtreNiveauId);
+
+  // Quand on change de niveau, on réinitialise la classe choisie si elle n'appartient
+  // plus au niveau, et on pré-sélectionne le contexte dans le formulaire d'ajout.
+  function changeFiltreNiveau(val: number | "") {
+    setFiltreNiveauId(val);
+    setFiltreClasseId("");
+    if (val !== "") {
+      const premiere = classes.find((c) => c.niveau_id === val);
+      if (premiere) setForm((prev) => ({ ...prev, classe_id: premiere.id }));
+    }
+  }
+  function changeFiltreClasse(val: number | "") {
+    setFiltreClasseId(val);
+    if (val !== "") setForm((prev) => ({ ...prev, classe_id: val }));
+  }
+  function changeFiltreSemestre(val: number | "") {
+    setFiltreSemestreId(val);
+    if (val !== "") setForm((prev) => ({ ...prev, semestre_id: val }));
+  }
+
+  // ECUEs filtrées (par niveau via la classe, par classe, par semestre).
+  const filtered = items.filter((e) => {
+    if (filtreNiveauId !== "" && niveauIdOfClasse(e.classe_id) !== filtreNiveauId) return false;
+    if (filtreClasseId !== "" && e.classe_id !== filtreClasseId) return false;
+    if (filtreSemestreId !== "" && e.semestre_id !== filtreSemestreId) return false;
+    return true;
+  });
+
+  const filtreActif = filtreNiveauId !== "" || filtreClasseId !== "" || filtreSemestreId !== "";
+  const totalHeures = filtered.reduce(
+    (acc, e) => acc + e.heures_cm_defaut + e.heures_td_defaut + e.heures_tp_defaut,
+    0,
+  );
 
   return (
     <div className="space-y-4">
+      {/* Filtre par classe : Niveau → Classe → Semestre */}
+      <div className="bg-white p-3 rounded-lg border border-gray-200">
+        <div className="text-sm font-medium text-gray-800 mb-2">Filtrer par classe</div>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+          <select
+            value={filtreNiveauId}
+            onChange={(e) => changeFiltreNiveau(e.target.value === "" ? "" : Number(e.target.value))}
+            className="px-2 py-1.5 text-sm border border-gray-300 rounded"
+          >
+            <option value="">Tous les niveaux</option>
+            {niveaux.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.nom}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filtreClasseId}
+            onChange={(e) => changeFiltreClasse(e.target.value === "" ? "" : Number(e.target.value))}
+            className="px-2 py-1.5 text-sm border border-gray-300 rounded"
+          >
+            <option value="">Toutes les classes</option>
+            {classesDuNiveau.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nom}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filtreSemestreId}
+            onChange={(e) =>
+              changeFiltreSemestre(e.target.value === "" ? "" : Number(e.target.value))
+            }
+            className="px-2 py-1.5 text-sm border border-gray-300 rounded"
+          >
+            <option value="">Tous les semestres</option>
+            {semestres.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.nom}
+              </option>
+            ))}
+          </select>
+          {filtreActif && (
+            <button
+              type="button"
+              onClick={() => {
+                setFiltreNiveauId("");
+                setFiltreClasseId("");
+                setFiltreSemestreId("");
+              }}
+              className="px-2 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 text-gray-700"
+            >
+              Réinitialiser
+            </button>
+          )}
+        </div>
+        <div className="text-xs text-gray-500 mt-2">
+          {filtered.length} ECUE{filtered.length > 1 ? "s" : ""}
+          {filtreActif ? " (filtrées)" : ""} · {totalHeures} h au total
+        </div>
+      </div>
+
+      {/* Formulaire d'ajout */}
       <div className="bg-white p-3 rounded-lg border border-gray-200 space-y-2">
         <input
           placeholder="Intitulé de l'ECUE"
@@ -321,7 +434,7 @@ function EcuesPanel() {
             onChange={(e) => setForm({ ...form, classe_id: Number(e.target.value) })}
             className="px-2 py-1.5 text-sm border border-gray-300 rounded"
           >
-            {classes.map((c) => (
+            {classesDuNiveau.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.nom}
               </option>
@@ -374,9 +487,10 @@ function EcuesPanel() {
         </button>
       </div>
       <SimpleTable
-        headers={["Intitulé", "Classe", "Semestre", "CM", "TD", "TP", ""]}
-        rows={items.map((e) => [
+        headers={["Intitulé", "Niveau", "Classe", "Semestre", "CM", "TD", "TP", ""]}
+        rows={filtered.map((e) => [
           e.intitule,
+          niveauNameOfClasse(e.classe_id),
           classeName(e.classe_id),
           semestreName(e.semestre_id),
           e.heures_cm_defaut,
