@@ -93,24 +93,58 @@ def import_academic(
     _=Depends(require_admin),
 ) -> ImportResult:
     """
-    Import hiérarchique des données académiques.
+    Import hiérarchique des données académiques (REMPLACE tout l'existant).
 
     Colonnes attendues :
         niveau, classe, semestre, ecue, heures_cm, heures_td, heures_tp
+
+    Convention « report de valeurs » : niveau / classe / semestre ne sont
+    saisis que sur la première ligne d'un groupe ; laissés vides en dessous,
+    ils héritent automatiquement de la dernière valeur non vide rencontrée.
+    Exemple :
+        L1 | Informatique | Semestre 1 | Algèbre 1   | 20 | 10 | 5
+           |              |            | Analyse 1   | 15 |  8 | 12
+           |              |            | Électricité | 18 |  6 | 10
     """
     rows = _read_upload(file)
     created = updated = skipped = 0
     errors: list[str] = []
 
+    # Mode « remplacer tout l'académique » : on purge l'existant avant import.
+    # La suppression des niveaux fait tomber classes + ECUEs en cascade
+    # (ondelete CASCADE). On nettoie ensuite les semestres devenus orphelins.
+    db.query(Ecue).delete(synchronize_session=False)
+    db.query(Classe).delete(synchronize_session=False)
+    db.query(Niveau).delete(synchronize_session=False)
+    db.query(Semestre).delete(synchronize_session=False)
+    db.flush()
+
     niveaux_cache: dict[str, Niveau] = {}
     classes_cache: dict[tuple[int, str], Classe] = {}
     semestres_cache: dict[str, Semestre] = {}
 
+    # Valeurs « courantes » pour le report (forward-fill)
+    cur_niveau_nom = ""
+    cur_classe_nom = ""
+    cur_semestre_nom = ""
+
     for i, row in enumerate(rows, start=2):
-        niveau_nom = row.get("niveau", "")
-        classe_nom = row.get("classe", "")
-        semestre_nom = row.get("semestre", "")
-        ecue_nom = row.get("ecue") or row.get("intitule") or ""
+        # Report : on ne met à jour la valeur courante que si la cellule est remplie
+        if row.get("niveau", "").strip():
+            cur_niveau_nom = row["niveau"].strip()
+            # Un nouveau niveau réinitialise classe et semestre courants
+            cur_classe_nom = ""
+            cur_semestre_nom = ""
+        if row.get("classe", "").strip():
+            cur_classe_nom = row["classe"].strip()
+            cur_semestre_nom = ""
+        if row.get("semestre", "").strip():
+            cur_semestre_nom = row["semestre"].strip()
+
+        niveau_nom = cur_niveau_nom
+        classe_nom = cur_classe_nom
+        semestre_nom = cur_semestre_nom
+        ecue_nom = (row.get("ecue") or row.get("intitule") or "").strip()
 
         if not all([niveau_nom, classe_nom, semestre_nom, ecue_nom]):
             errors.append(f"Ligne {i}: niveau/classe/semestre/ecue requis")
@@ -204,11 +238,21 @@ TEMPLATES: dict[str, dict] = {
     },
     "academic": {
         "headers": ["niveau", "classe", "semestre", "ecue", "heures_cm", "heures_td", "heures_tp"],
+        # Convention « report de valeurs » : niveau/classe/semestre ne sont
+        # écrits que sur la première ligne du groupe, puis laissés vides ("").
+        # Un niveau a plusieurs classes/filières, une classe a 2 semestres,
+        # un semestre a plusieurs ECUEs.
         "sample": [
-            ["L1", "Informatique", "Semestre 1", "Introduction à l'algorithmique", "20", "10", "5"],
-            ["L2", "Informatique", "Semestre 3", "Bases de données relationnelles", "15", "8", "12"],
-            ["L3", "Informatique", "Semestre 5", "Réseaux et protocoles", "18", "6", "10"],
-            ["M1", "Informatique", "Semestre 1", "Génie logiciel avancé", "14", "8", "6"],
+            ["L1", "Informatique", "Semestre 1", "Algèbre 1", "20", "10", "5"],
+            ["", "", "", "Analyse 1", "15", "8", "12"],
+            ["", "", "", "Initiation à la programmation", "14", "8", "6"],
+            ["", "", "Semestre 2", "Algèbre 2", "20", "10", "5"],
+            ["", "", "", "Architecture des ordinateurs", "18", "6", "10"],
+            ["", "Gestion", "Semestre 1", "Introduction à l'économie", "18", "6", "10"],
+            ["", "", "", "Comptabilité générale 1", "20", "10", "5"],
+            ["", "", "Semestre 2", "Comptabilité générale 2", "20", "10", "5"],
+            ["L2", "Informatique", "Semestre 3", "Bases de données", "15", "8", "12"],
+            ["", "", "", "Réseaux et protocoles", "18", "6", "10"],
         ],
     },
 }
