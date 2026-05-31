@@ -388,8 +388,7 @@ function EcuesPanel() {
       <CsvImport
         endpoint="/import/academic"
         templateKind="academic"
-        destructive
-        hint="Colonnes : niveau, classe, semestre, ecue, heures_cm, heures_td, heures_tp. Laissez niveau/classe/semestre vides pour répéter la valeur du dessus. ⚠️ L'import remplace tout l'académique."
+        hint="Un fichier = 1 niveau + 1 classe + 1 semestre. En haut : niveau, classe, semestre (une valeur par ligne), puis le tableau « ecue | heures_cm | heures_td | heures_tp ». Import additif : les ECUEs existantes sont mises à jour, les nouvelles ajoutées, rien n'est supprimé."
         onDone={load}
       />
     </div>
@@ -524,14 +523,11 @@ function CsvImport({
   templateKind,
   hint,
   onDone,
-  destructive = false,
 }: {
   endpoint: string;
   templateKind: "enseignants" | "academic";
   hint: string;
   onDone: () => void;
-  /** Si vrai : l'import REMPLACE toutes les données existantes (demande confirmation). */
-  destructive?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -539,18 +535,6 @@ function CsvImport({
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (
-      destructive &&
-      !window.confirm(
-        "⚠️ Cet import va REMPLACER toutes les données académiques existantes " +
-          "(niveaux, classes, semestres et ECUEs).\n\n" +
-          "Les contrats déjà générés ne sont pas affectés.\n\n" +
-          "Voulez-vous continuer ?",
-      )
-    ) {
-      e.target.value = "";
-      return;
-    }
     setBusy(true);
     setResult(null);
     try {
