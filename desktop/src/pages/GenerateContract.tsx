@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Trash2, Download, FolderDown, Printer, BookOpen } from "lucide-react";
+import { Plus, Trash2, Download, FolderDown, Printer } from "lucide-react";
 import { api } from "@/lib/api";
 import { downloadContract, printContract } from "@/lib/download";
 import {
@@ -70,13 +70,8 @@ export default function GenerateContract() {
   const [semestres, setSemestres] = useState<Semestre[]>([]);
   const [ecuesDb, setEcuesDb] = useState<Ecue[]>([]);
   const [defaultDir, setDefaultDir] = useState<string>("");
-  const [pickerOpen, setPickerOpen] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-
-  // Chargement rapide en cascade : Niveau → Classe → ECUEs de la classe
-  const [quickNiveauId, setQuickNiveauId] = useState<number | "">("");
-  const [quickClasseId, setQuickClasseId] = useState<number | "">("");
 
   useEffect(() => {
     Promise.all([
@@ -191,51 +186,6 @@ export default function GenerateContract() {
       classe: classe?.nom ?? "",
       semestre: semestre?.nom ?? "Semestre 1",
     });
-    setPickerOpen(null);
-  }
-
-  // Classes du niveau sélectionné (cascade Niveau → Classe)
-  const quickClasses = useMemo(
-    () => (quickNiveauId === "" ? [] : classes.filter((c) => c.niveau_id === quickNiveauId)),
-    [classes, quickNiveauId],
-  );
-
-  // Convertit un Ecue (BDD) en EcueInput (formulaire), avec ses libellés résolus
-  function ecueDbToInput(e: Ecue): EcueInput {
-    const classe = classes.find((c) => c.id === e.classe_id);
-    const niveau = classe ? niveaux.find((n) => n.id === classe.niveau_id) : undefined;
-    const semestre = semestres.find((s) => s.id === e.semestre_id);
-    return {
-      intitule: e.intitule,
-      heures_cm: e.heures_cm_defaut,
-      heures_td: e.heures_td_defaut,
-      heures_tp: e.heures_tp_defaut,
-      niveau: niveau?.nom ?? "L1",
-      classe: classe?.nom ?? "",
-      semestre: semestre?.nom ?? "Semestre 1",
-    };
-  }
-
-  // Charge en bloc toutes les ECUEs de la classe sélectionnée dans le formulaire
-  function loadEcuesOfClasse() {
-    if (quickClasseId === "") return;
-    const matching = ecuesDb.filter((e) => e.classe_id === quickClasseId);
-    if (matching.length === 0) {
-      showToast("Aucune ECUE enregistrée pour cette classe.");
-      return;
-    }
-    const rows = matching.map(ecueDbToInput);
-    setForm((prev) => {
-      // Si la seule ligne existante est vide, on la remplace ; sinon on ajoute à la suite.
-      const existing =
-        prev.ecues.length === 1 && prev.ecues[0].intitule.trim() === "" ? [] : prev.ecues;
-      // Évite les doublons d'intitulé déjà présents
-      const seen = new Set(existing.map((e) => e.intitule.trim().toLowerCase()));
-      const toAdd = rows.filter((r) => !seen.has(r.intitule.trim().toLowerCase()));
-      return { ...prev, ecues: [...existing, ...toAdd] };
-    });
-    const classeNom = classes.find((c) => c.id === quickClasseId)?.nom ?? "";
-    showToast(`${matching.length} ECUE(s) de « ${classeNom} » chargée(s).`);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -424,72 +374,11 @@ export default function GenerateContract() {
             </button>
           </div>
 
-          {/* Chargement rapide en cascade : Niveau → Classe → ECUEs de la classe */}
-          {niveaux.length > 0 && (
-            <div className="mb-4 bg-enastic-50 border border-enastic-100 rounded-lg p-3">
-              <div className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
-                <BookOpen size={14} /> Chargement rapide par classe
-              </div>
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="flex-1 min-w-[120px]">
-                  <label className="block text-xs text-gray-600 mb-1">Niveau</label>
-                  <select
-                    value={quickNiveauId}
-                    onChange={(e) => {
-                      setQuickNiveauId(e.target.value ? Number(e.target.value) : "");
-                      setQuickClasseId("");
-                    }}
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white"
-                  >
-                    <option value="">— Choisir —</option>
-                    {niveaux.map((n) => (
-                      <option key={n.id} value={n.id}>
-                        {n.nom}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex-1 min-w-[160px]">
-                  <label className="block text-xs text-gray-600 mb-1">Classe</label>
-                  <select
-                    value={quickClasseId}
-                    disabled={quickNiveauId === ""}
-                    onChange={(e) =>
-                      setQuickClasseId(e.target.value ? Number(e.target.value) : "")
-                    }
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white disabled:bg-gray-100 disabled:text-gray-400"
-                  >
-                    <option value="">
-                      {quickNiveauId === "" ? "— Choisir un niveau d'abord —" : "— Choisir —"}
-                    </option>
-                    {quickClasses.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nom}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  type="button"
-                  disabled={quickClasseId === ""}
-                  onClick={loadEcuesOfClasse}
-                  className="flex items-center gap-1 text-sm bg-enastic-500 hover:bg-enastic-600 disabled:bg-gray-300 text-white px-3 py-1.5 rounded-lg whitespace-nowrap"
-                >
-                  <Plus size={14} /> Charger les ECUEs
-                </button>
-              </div>
-              {quickNiveauId !== "" && quickClasses.length === 0 && (
-                <p className="mt-2 text-xs text-amber-600">
-                  Aucune classe pour ce niveau. Ajoutez-en dans la section Académique.
-                </p>
-              )}
-              {toast && (
-                <div className="mt-2 text-xs bg-white border border-enastic-200 rounded px-2 py-1.5 text-gray-700">
-                  {toast}
-                </div>
-              )}
-            </div>
-          )}
+          <p className="mb-3 text-xs text-gray-500">
+            Pour chaque ligne, choisissez le niveau, la classe/filière puis l'ECUE
+            dans la liste : ses heures se remplissent automatiquement et restent
+            modifiables.
+          </p>
 
           <div className="space-y-3">
             {form.ecues.map((ecue, idx) => (
@@ -497,12 +386,9 @@ export default function GenerateContract() {
                 key={idx}
                 index={idx}
                 ecue={ecue}
-                pickerOpen={pickerOpen === idx}
-                onTogglePicker={() => setPickerOpen(pickerOpen === idx ? null : idx)}
                 ecuesDb={ecuesDb}
                 niveaux={niveaux}
                 classes={classes}
-                semestres={semestres}
                 niveauOptions={niveauOptions}
                 semestreOptions={semestreOptions}
                 onPickEcue={(id) => applyEcueFromDb(idx, id)}
@@ -622,12 +508,9 @@ export default function GenerateContract() {
 interface EcueRowProps {
   index: number;
   ecue: EcueInput;
-  pickerOpen: boolean;
-  onTogglePicker: () => void;
   ecuesDb: Ecue[];
   niveaux: Niveau[];
   classes: Classe[];
-  semestres: Semestre[];
   niveauOptions: string[];
   semestreOptions: string[];
   onPickEcue: (id: number) => void;
@@ -638,113 +521,55 @@ interface EcueRowProps {
 function EcueRow({
   index,
   ecue,
-  pickerOpen,
-  onTogglePicker,
   ecuesDb,
   niveaux,
   classes,
-  semestres,
   niveauOptions,
   semestreOptions,
   onPickEcue,
   onChange,
   onRemove,
 }: EcueRowProps) {
-  // ECUEs filtrés selon le niveau/classe/semestre sélectionnés dans la ligne
-  const filteredEcues = useMemo(() => {
-    const selectedNiveau = niveaux.find((n) => n.nom === ecue.niveau);
-    const selectedSemestre = semestres.find((s) => s.nom === ecue.semestre);
-    return ecuesDb.filter((e) => {
-      const classe = classes.find((c) => c.id === e.classe_id);
-      if (selectedNiveau && classe && classe.niveau_id !== selectedNiveau.id) return false;
-      if (ecue.classe && classe && classe.nom !== ecue.classe) return false;
-      if (selectedSemestre && e.semestre_id !== selectedSemestre.id) return false;
-      return true;
-    });
-  }, [ecuesDb, classes, niveaux, semestres, ecue.niveau, ecue.classe, ecue.semestre]);
+  const selectedNiveau = niveaux.find((n) => n.nom === ecue.niveau);
 
-  // Suggestions de classes limitées au niveau choisi pour cette ligne (cascade)
+  // Classes limitées au niveau choisi pour cette ligne (cascade Niveau → Classe).
   const classesForNiveau = useMemo(() => {
-    const selectedNiveau = niveaux.find((n) => n.nom === ecue.niveau);
     if (!selectedNiveau) return classes;
     return classes.filter((c) => c.niveau_id === selectedNiveau.id);
-  }, [classes, niveaux, ecue.niveau]);
+  }, [classes, selectedNiveau]);
+
+  const selectedClasse = classesForNiveau.find((c) => c.nom === ecue.classe);
+
+  // ECUEs de la classe choisie (proposées dans la liste déroulante de la ligne).
+  const ecuesForClasse = useMemo(() => {
+    if (!selectedClasse) return [];
+    return ecuesDb.filter((e) => e.classe_id === selectedClasse.id);
+  }, [ecuesDb, selectedClasse]);
+
+  // ECUE actuellement sélectionnée dans la liste (correspondance par intitulé + classe).
+  const currentEcueId =
+    ecuesForClasse.find((e) => e.intitule === ecue.intitule)?.id ?? "";
 
   return (
     <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm font-medium text-gray-700">ECUE #{index + 1}</span>
-        <div className="flex items-center gap-2">
-          {ecuesDb.length > 0 && (
-            <button
-              type="button"
-              onClick={onTogglePicker}
-              className="flex items-center gap-1 text-xs bg-white border border-enastic-300 text-enastic-600 px-2 py-1 rounded hover:bg-enastic-50"
-            >
-              <BookOpen size={12} />
-              {pickerOpen ? "Fermer" : "Depuis la BDD"}
-            </button>
-          )}
-          {onRemove && (
-            <button type="button" onClick={onRemove} className="text-red-500 hover:text-red-700">
-              <Trash2 size={16} />
-            </button>
-          )}
-        </div>
+        {onRemove && (
+          <button type="button" onClick={onRemove} className="text-red-500 hover:text-red-700">
+            <Trash2 size={16} />
+          </button>
+        )}
       </div>
 
-      {pickerOpen && (
-        <div className="mb-3 max-h-48 overflow-auto bg-white border border-gray-200 rounded p-2">
-          {filteredEcues.length === 0 ? (
-            <div className="text-xs text-gray-400 p-2 text-center">
-              Aucun ECUE correspondant. Ajustez niveau/classe/semestre ou créez l'ECUE dans la
-              section Académique.
-            </div>
-          ) : (
-            <ul className="space-y-1">
-              {filteredEcues.map((e) => {
-                const classe = classes.find((c) => c.id === e.classe_id);
-                const niveau = classe
-                  ? niveaux.find((n) => n.id === classe.niveau_id)
-                  : undefined;
-                const semestre = semestres.find((s) => s.id === e.semestre_id);
-                return (
-                  <li key={e.id}>
-                    <button
-                      type="button"
-                      onClick={() => onPickEcue(e.id)}
-                      className="w-full text-left px-2 py-1.5 text-xs hover:bg-enastic-50 rounded"
-                    >
-                      <div className="font-medium text-gray-800">{e.intitule}</div>
-                      <div className="text-gray-500">
-                        {niveau?.nom} · {classe?.nom} · {semestre?.nom} · CM
-                        {e.heures_cm_defaut}/TD{e.heures_td_defaut}/TP{e.heures_tp_defaut}
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
-
       <div className="grid grid-cols-12 gap-3">
-        <div className="col-span-12">
-          <label className="block text-xs text-gray-600 mb-1">Intitulé *</label>
-          <input
-            type="text"
-            required
-            value={ecue.intitule}
-            onChange={(e) => onChange({ intitule: e.target.value })}
-            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
-          />
-        </div>
         <div className="col-span-3">
           <label className="block text-xs text-gray-600 mb-1">Niveau</label>
           <select
             value={ecue.niveau}
-            onChange={(e) => onChange({ niveau: e.target.value })}
+            onChange={(e) =>
+              // Changer de niveau remet à zéro la classe (cascade).
+              onChange({ niveau: e.target.value, classe: "" })
+            }
             className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
           >
             {niveauOptions.map((n) => (
@@ -752,21 +577,54 @@ function EcueRow({
             ))}
           </select>
         </div>
-        <div className="col-span-5">
+        <div className="col-span-4">
           <label className="block text-xs text-gray-600 mb-1">Classe / Filière</label>
+          <select
+            value={selectedClasse ? ecue.classe : ""}
+            onChange={(e) => onChange({ classe: e.target.value })}
+            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white"
+          >
+            <option value="">— Choisir —</option>
+            {classesForNiveau.map((c) => (
+              <option key={c.id} value={c.nom}>
+                {c.nom}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="col-span-5">
+          <label className="block text-xs text-gray-600 mb-1">ECUE *</label>
+          <select
+            value={currentEcueId}
+            disabled={!selectedClasse}
+            onChange={(e) => {
+              if (e.target.value) onPickEcue(Number(e.target.value));
+            }}
+            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white disabled:bg-gray-100 disabled:text-gray-400"
+          >
+            <option value="">
+              {!selectedClasse
+                ? "— Choisir une classe d'abord —"
+                : ecuesForClasse.length === 0
+                  ? "— Aucune ECUE pour cette classe —"
+                  : "— Choisir une ECUE —"}
+            </option>
+            {ecuesForClasse.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.intitule}
+              </option>
+            ))}
+          </select>
+          {/* Champ requis caché : garantit qu'une ECUE est bien sélectionnée. */}
           <input
             type="text"
-            value={ecue.classe}
-            onChange={(e) => onChange({ classe: e.target.value })}
-            list={`classes-${index}`}
-            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
+            required
+            value={ecue.intitule}
+            onChange={() => {}}
+            tabIndex={-1}
+            aria-hidden
+            className="sr-only"
           />
-          {/* La liste de suggestions se limite aux classes du niveau choisi */}
-          <datalist id={`classes-${index}`}>
-            {classesForNiveau.map((c) => (
-              <option key={c.id} value={c.nom} />
-            ))}
-          </datalist>
         </div>
         <div className="col-span-4">
           <label className="block text-xs text-gray-600 mb-1">Semestre</label>
@@ -780,7 +638,7 @@ function EcueRow({
             ))}
           </select>
         </div>
-        <div className="col-span-4">
+        <div className="col-span-2">
           <label className="block text-xs text-gray-600 mb-1">Heures CM</label>
           <input
             type="number"
@@ -791,7 +649,7 @@ function EcueRow({
             className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
           />
         </div>
-        <div className="col-span-4">
+        <div className="col-span-3">
           <label className="block text-xs text-gray-600 mb-1">Heures TD</label>
           <input
             type="number"
@@ -802,7 +660,7 @@ function EcueRow({
             className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
           />
         </div>
-        <div className="col-span-4">
+        <div className="col-span-3">
           <label className="block text-xs text-gray-600 mb-1">Heures TP</label>
           <input
             type="number"
@@ -814,6 +672,11 @@ function EcueRow({
           />
         </div>
       </div>
+      {ecue.intitule && (
+        <p className="mt-2 text-xs text-gray-500">
+          ECUE sélectionnée : <span className="font-medium text-gray-700">{ecue.intitule}</span>
+        </p>
+      )}
     </div>
   );
 }

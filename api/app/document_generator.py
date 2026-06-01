@@ -61,9 +61,35 @@ class ContractGenerator:
 
     @staticmethod
     def _set_cell_background(cell, color: str) -> None:
+        tc_pr = cell._element.get_or_add_tcPr()
+        # Retirer un éventuel ombrage existant pour éviter les doublons.
+        for shd in tc_pr.findall(qn("w:shd")):
+            tc_pr.remove(shd)
         shading = OxmlElement("w:shd")
+        shading.set(qn("w:val"), "clear")
+        shading.set(qn("w:color"), "auto")
         shading.set(qn("w:fill"), color)
-        cell._element.get_or_add_tcPr().append(shading)
+        tc_pr.append(shading)
+
+    @staticmethod
+    def _clear_cell_background(cell) -> None:
+        """Supprime tout ombrage de fond d'une cellule."""
+        tc_pr = cell._element.find(qn("w:tcPr"))
+        if tc_pr is None:
+            return
+        for shd in tc_pr.findall(qn("w:shd")):
+            tc_pr.remove(shd)
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        """Normalise pour comparer des libellés de grade (apostrophes,
+        espaces, casse)."""
+        return (
+            text.replace("’", "'")  # apostrophe typographique → simple
+            .replace(" ", " ")  # espace insécable → espace
+            .strip()
+            .lower()
+        )
 
     @staticmethod
     def _replace_in_paragraph(paragraph, old: str, new: str) -> None:
@@ -79,23 +105,63 @@ class ContractGenerator:
                     self._replace_in_paragraph(para, old, new)
 
     def _highlight_grade_row(self, table, grade: str) -> None:
+        """Surligne en jaune UNIQUEMENT la ligne du grade choisi.
+
+        On retire d'abord tout ombrage jaune éventuellement figé dans le
+        modèle (ex. « Maître de Conférences » pré-colorié), puis on colore
+        la seule ligne correspondant au grade sélectionné.
+        """
         target = self.GRADE_MAPPING.get(grade)
-        if not target:
-            return
+        target_norm = self._normalize(target) if target else None
+
+        # 1) Nettoyer : aucune ligne ne doit rester jaune par défaut.
         for i, row in enumerate(table.rows):
             if i == 0:
                 continue
-            if target in row.cells[0].text.strip():
-                for cell in row.cells:
-                    self._set_cell_background(cell, "FFFF00")
+            for cell in row.cells:
+                self._clear_cell_background(cell)
+
+        if not target_norm:
+            return
+
+        # 2) Trouver la ligne du grade choisi.
+        #    On exige d'abord une égalité EXACTE (sinon « Assistant » matcherait
+        #    « Maître Assistant »). Le repli « contient » ne sert que si aucune
+        #    ligne n'est exactement égale.
+        exact_idx = None
+        contains_idx = None
+        for i, row in enumerate(table.rows):
+            if i == 0:
+                continue
+            label = self._normalize(row.cells[0].text)
+            if label == target_norm:
+                exact_idx = i
                 break
+            if contains_idx is None and target_norm in label:
+                contains_idx = i
+
+        chosen = exact_idx if exact_idx is not None else contains_idx
+        if chosen is not None:
+            for cell in table.rows[chosen].cells:
+                self._set_cell_background(cell, "FFFF00")
 
     @staticmethod
     def _is_ecue_table(table) -> bool:
+        """Tableau des ECUEs (article 2) : reconnu si une cellule de l'en-tête
+        contient « Intitulé » ou « ECUE ». Tolère une colonne « Niveau et
+        Mention » placée avant l'intitulé (nouveau modèle à 5 colonnes)."""
         if not table.rows:
             return False
-        first = table.rows[0].cells[0].text
-        return "Intitulé" in first or "ECUE" in first
+        header = " ".join(c.text for c in table.rows[0].cells)
+        return "Intitulé" in header or "ECUE" in header
+
+    @staticmethod
+    def _ecue_has_niveau_col(table) -> bool:
+        """Vrai si la 1re colonne de l'en-tête est « Niveau et Mention »
+        (modèle à 5 colonnes)."""
+        if not table.rows:
+            return False
+        return "Niveau" in table.rows[0].cells[0].text
 
     @staticmethod
     def _ensure_cell_borders(cell, color: str = "000000", size: str = "4") -> None:
@@ -133,6 +199,9 @@ class ContractGenerator:
         """
         if not ecues or len(table.rows) <= 1:
             return
+
+        # 0) Modèle à 5 colonnes : 1re colonne « Niveau et Mention ».
+        has_niveau = self._ecue_has_niveau_col(table)
 
         # 1) Identifier les positions clés
         rows = table.rows
@@ -172,12 +241,25 @@ class ContractGenerator:
             sum_td += int(ecue.get("heures_td", 0) or 0)
             sum_tp += int(ecue.get("heures_tp", 0) or 0)
             new_row = table.add_row()
-            values = [
-                ecue.get("intitule", ""),
-                str(ecue.get("heures_cm", "")),
-                str(ecue.get("heures_td", "")),
-                str(ecue.get("heures_tp", "")),
-            ]
+            if has_niveau:
+                # « Niveau et Mention » = niveau + classe/filière de l'ECUE.
+                niveau = str(ecue.get("niveau", "") or "").strip()
+                mention = str(ecue.get("classe", "") or "").strip()
+                niveau_mention = " ".join(p for p in (niveau, mention) if p)
+                values = [
+                    niveau_mention,
+                    ecue.get("intitule", ""),
+                    str(ecue.get("heures_cm", "")),
+                    str(ecue.get("heures_td", "")),
+                    str(ecue.get("heures_tp", "")),
+                ]
+            else:
+                values = [
+                    ecue.get("intitule", ""),
+                    str(ecue.get("heures_cm", "")),
+                    str(ecue.get("heures_td", "")),
+                    str(ecue.get("heures_tp", "")),
+                ]
             for j, cell in enumerate(new_row.cells):
                 cell.text = values[j] if j < len(values) else ""
 
@@ -196,24 +278,57 @@ class ContractGenerator:
                         para._element.remove(existing_ppr)
                     para._element.insert(0, deepcopy(para_styles[j]))
 
-        # 6) Réinsérer la ligne TOTAL (avec son style d'origine) + remplir les sommes
+        # 6) Ligne TOTAL.
+        #    Index de la 1re colonne d'heures : 1 (4 col.) ou 2 (5 col. avec
+        #    « Niveau et Mention »). Les colonnes avant contiennent le libellé.
+        heures_start = 2 if has_niveau else 1
+
         if total_row_xml is not None:
+            # 6a) Le modèle FOURNIT une ligne TOTAL : on la réinsère telle quelle.
             table._element.append(total_row_xml)
             total_row = table.rows[-1]
-            # Garder le libellé d'origine en cellule 0 (Total) ; remplir CM/TD/TP
-            sums = [None, str(sum_cm), str(sum_td), str(sum_tp)]
+            label_already_set = True
+        else:
+            # 6b) Le modèle n'a PAS de ligne TOTAL : on en crée une, avec le
+            #     style des lignes de données, et on met « Total » comme libellé.
+            total_row = table.add_row()
             for j, cell in enumerate(total_row.cells):
-                if j == 0:
-                    continue  # ne pas toucher au libellé "Total"
-                if j < len(sums) and sums[j] is not None:
-                    # Vider et remettre la valeur en gras
+                if j < len(cell_styles) and cell_styles[j] is not None:
+                    existing_tcpr = cell._element.find(qn("w:tcPr"))
+                    if existing_tcpr is not None:
+                        cell._element.remove(existing_tcpr)
+                    cell._element.insert(0, deepcopy(cell_styles[j]))
+                if j < len(para_styles) and para_styles[j] is not None and cell.paragraphs:
+                    para = cell.paragraphs[0]
+                    existing_ppr = para._element.find(qn("w:pPr"))
+                    if existing_ppr is not None:
+                        para._element.remove(existing_ppr)
+                    para._element.insert(0, deepcopy(para_styles[j]))
+            label_already_set = False
+
+        sums = [None] * heures_start + [str(sum_cm), str(sum_td), str(sum_tp)]
+        for j, cell in enumerate(total_row.cells):
+            if j < heures_start:
+                # Cellule(s) de gauche : poser le libellé « Total » si on a créé
+                # la ligne nous-mêmes ; sinon ne pas toucher au libellé d'origine.
+                if not label_already_set and j == heures_start - 1:
                     for para in list(cell.paragraphs):
                         for run in list(para.runs):
                             run._element.getparent().remove(run._element)
                     para = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
-                    run = para.add_run(sums[j])
+                    run = para.add_run("Total")
                     run.bold = True
                 self._ensure_cell_borders(cell)
+                continue
+            if j < len(sums) and sums[j] is not None:
+                # Vider et remettre la valeur en gras
+                for para in list(cell.paragraphs):
+                    for run in list(para.runs):
+                        run._element.getparent().remove(run._element)
+                para = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+                run = para.add_run(sums[j])
+                run.bold = True
+            self._ensure_cell_borders(cell)
 
     @staticmethod
     def _hash_contract(data: dict, contract_uuid: str) -> str:
