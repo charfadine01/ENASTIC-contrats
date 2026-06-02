@@ -17,7 +17,11 @@ jobs:
             os: macos-14
             rust-target: aarch64-apple-darwin
             pyinstaller-suffix: aarch64-apple-darwin
-            tauri-args: "--target aarch64-apple-darwin"
+            # On ne bundle que l'app (.app + .app.tar.gz pour l'updater).
+            # Le .dmg est volontairement exclu : son script bundle_dmg.sh
+            # échoue de façon intermittente sur les runners CI (AppleScript)
+            # et il n'est pas nécessaire à la mise à jour automatique.
+            tauri-args: "--target aarch64-apple-darwin --bundles app"
           - name: windows
             os: windows-latest
             rust-target: x86_64-pc-windows-msvc
@@ -98,7 +102,6 @@ jobs:
           # Le glob target/**/ n'attrape PAS de façon fiable le cas "zéro segment"
           # (Windows), d'où l'ajout des chemins target/release/bundle/... explicites.
           path: |
-            desktop/src-tauri/target/*/release/bundle/dmg/*.dmg
             desktop/src-tauri/target/*/release/bundle/macos/*.app.tar.gz
             desktop/src-tauri/target/*/release/bundle/macos/*.app.tar.gz.sig
             desktop/src-tauri/target/release/bundle/msi/*.msi

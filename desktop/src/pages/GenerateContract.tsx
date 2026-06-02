@@ -140,6 +140,15 @@ export default function GenerateContract() {
   const semestreOptions =
     semestres.length > 0 ? semestres.map((s) => s.nom) : [...DEFAULT_SEMESTRES];
 
+  // Récapitulatif des heures pour le résumé avant génération.
+  const totals = useMemo(() => {
+    const cm = form.ecues.reduce((a, e) => a + (Number(e.heures_cm) || 0), 0);
+    const td = form.ecues.reduce((a, e) => a + (Number(e.heures_td) || 0), 0);
+    const tp = form.ecues.reduce((a, e) => a + (Number(e.heures_tp) || 0), 0);
+    const ecuesValides = form.ecues.filter((e) => e.intitule.trim() !== "").length;
+    return { cm, td, tp, total: cm + td + tp, ecuesValides };
+  }, [form.ecues]);
+
   function updateField<K extends keyof ContractGenerateRequest>(
     key: K,
     value: ContractGenerateRequest[K],
@@ -484,6 +493,50 @@ export default function GenerateContract() {
             )}
           </div>
         )}
+
+        {/* Récapitulatif avant génération */}
+        <section className="bg-gray-50 rounded-xl border border-gray-200 p-5">
+          <h3 className="font-semibold text-gray-900 mb-3">Récapitulatif</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div>
+              <div className="text-xs text-gray-500">Enseignant</div>
+              <div className="font-medium text-gray-800 truncate">
+                {form.nom_enseignant || "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">Grade</div>
+              <div className="font-medium text-gray-800">{form.grade || "—"}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">Année académique</div>
+              <div className="font-medium text-gray-800">{form.annee_academique || "—"}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">ECUEs</div>
+              <div className="font-medium text-gray-800">{totals.ecuesValides}</div>
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-700 border-t border-gray-200 pt-3">
+            <span>
+              Total CM : <span className="font-semibold">{totals.cm} h</span>
+            </span>
+            <span>
+              Total TD : <span className="font-semibold">{totals.td} h</span>
+            </span>
+            <span>
+              Total TP : <span className="font-semibold">{totals.tp} h</span>
+            </span>
+            <span className="text-enastic-700">
+              Total général : <span className="font-bold">{totals.total} h</span>
+            </span>
+          </div>
+          {totals.ecuesValides === 0 && (
+            <p className="mt-2 text-xs text-amber-600">
+              Ajoutez au moins une ECUE avant de générer le contrat.
+            </p>
+          )}
+        </section>
 
         <div className="flex justify-end">
           <button
