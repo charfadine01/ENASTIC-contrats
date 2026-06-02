@@ -3,6 +3,7 @@ import {
   BookOpen,
   FileText,
   History,
+  LayoutDashboard,
   LogOut,
   Settings as SettingsIcon,
   User as UserIcon,
@@ -35,6 +36,9 @@ export default function Layout() {
           <p className="text-xs text-gray-500">Contrats de Vacations</p>
         </div>
         <nav className="flex-1 p-3 space-y-1">
+          <NavLink to="/accueil" className={linkClass}>
+            <LayoutDashboard size={18} /> Accueil
+          </NavLink>
           <NavLink to="/" end className={linkClass}>
             <FileText size={18} /> Nouveau contrat
           </NavLink>

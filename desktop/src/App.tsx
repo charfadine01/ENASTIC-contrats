@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import Login from "@/pages/Login";
 import Layout from "@/pages/Layout";
 import GenerateContract from "@/pages/GenerateContract";
+import Dashboard from "@/pages/Dashboard";
 import History from "@/pages/History";
 import Academic from "@/pages/Academic";
 import Users from "@/pages/Users";
@@ -64,6 +65,7 @@ export default function App() {
             }
           >
             <Route index element={<GenerateContract />} />
+            <Route path="accueil" element={<Dashboard />} />
             <Route path="historique" element={<History />} />
             <Route
               path="academique"
