@@ -6,7 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.models import User
-from app.routers import academic, auth, contracts, imports, settings as settings_router, users
+from app.routers import (
+    academic,
+    auth,
+    backup,
+    contracts,
+    imports,
+    settings as settings_router,
+    users,
+)
 from app.security import hash_password
 
 logging.basicConfig(level=logging.INFO)
@@ -55,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(imports.router)
     app.include_router(settings_router.router)
+    app.include_router(backup.router)
 
     @app.get("/health", tags=["meta"])
     def health() -> dict:
