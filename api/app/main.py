@@ -13,6 +13,7 @@ from app.routers import (
     contracts,
     imports,
     settings as settings_router,
+    stats,
     users,
 )
 from app.security import hash_password
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(imports.router)
     app.include_router(settings_router.router)
     app.include_router(backup.router)
+    app.include_router(stats.router)
 
     @app.get("/health", tags=["meta"])
     def health() -> dict:

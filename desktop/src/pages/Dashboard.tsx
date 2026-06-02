@@ -1,16 +1,41 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BookOpen,
+  Clock,
+  Download,
   FileText,
   GraduationCap,
   Layers,
   Plus,
   Users as UsersIcon,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, API_BASE_URL } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Classe, Contract, Ecue, Enseignant, Niveau } from "@/lib/types";
+
+interface StatLigne {
+  enseignant: string;
+  grade: string;
+  contrats: number;
+  heures_cm: number;
+  heures_td: number;
+  heures_tp: number;
+  heures_total: number;
+}
+interface StatsReponse {
+  annee: string | null;
+  annees: string[];
+  lignes: StatLigne[];
+  totaux: {
+    enseignants: number;
+    contrats: number;
+    heures_cm: number;
+    heures_td: number;
+    heures_tp: number;
+    heures_total: number;
+  };
+}
 
 /** Année académique en cours (septembre N → août N+1). */
 function currentAcademicYear(): string {
@@ -190,6 +215,159 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {isAdmin && <StatsEnseignants />}
+    </div>
+  );
+}
+
+// ─── Statistiques : heures par enseignant ───────────────────────────────────
+
+function StatsEnseignants() {
+  const [data, setData] = useState<StatsReponse | null>(null);
+  const [annee, setAnnee] = useState<string>(""); // "" = toutes années
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  // Évite un setState après démontage.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    const q = annee ? `?annee=${encodeURIComponent(annee)}` : "";
+    api
+      .get<StatsReponse>(`/stats/enseignants${q}`)
+      .then((res) => {
+        if (aliveRef.current) setData(res.data);
+      })
+      .finally(() => {
+        if (aliveRef.current) setLoading(false);
+      });
+  }, [annee]);
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const token = localStorage.getItem("enastic_token");
+      const q = annee ? `?annee=${encodeURIComponent(annee)}` : "";
+      const res = await fetch(`${API_BASE_URL}/stats/enseignants/export${q}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`Export échoué (${res.status})`);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      const filename = `heures-enseignants-${(annee || "toutes-annees").replace("/", "-")}.xlsx`;
+
+      if (inTauri) {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const { writeFile } = await import("@tauri-apps/plugin-fs");
+        const path = await save({
+          defaultPath: filename,
+          filters: [{ name: "Excel", extensions: ["xlsx"] }],
+        });
+        if (path) await writeFile(path, bytes);
+      } else {
+        const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        const blob = new Blob([buffer as ArrayBuffer], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const lignes = data?.lignes ?? [];
+
+  return (
+    <div className="mt-8 bg-white border border-gray-200 rounded-xl p-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+        <div className="flex items-center gap-2">
+          <Clock size={18} className="text-enastic-600" />
+          <h3 className="font-semibold text-gray-900">Heures par enseignant</h3>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={annee}
+            onChange={(e) => setAnnee(e.target.value)}
+            className="px-2 py-1.5 text-sm border border-gray-300 rounded bg-white"
+          >
+            <option value="">Toutes les années</option>
+            {(data?.annees ?? []).map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={exporting || lignes.length === 0}
+            className="flex items-center gap-1 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 px-3 py-1.5 rounded text-sm"
+          >
+            <Download size={14} /> {exporting ? "Export…" : "Exporter (Excel)"}
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-sm text-gray-500">Chargement…</div>
+      ) : lignes.length === 0 ? (
+        <div className="text-sm text-gray-500">Aucun contrat pour cette période.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-gray-500 border-b border-gray-200">
+              <tr>
+                <th className="text-left py-2 font-medium">Enseignant</th>
+                <th className="text-left py-2 font-medium">Grade</th>
+                <th className="text-right py-2 font-medium">Contrats</th>
+                <th className="text-right py-2 font-medium">CM</th>
+                <th className="text-right py-2 font-medium">TD</th>
+                <th className="text-right py-2 font-medium">TP</th>
+                <th className="text-right py-2 font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lignes.map((r) => (
+                <tr key={r.enseignant} className="border-b border-gray-100">
+                  <td className="py-2 font-medium text-gray-800">{r.enseignant}</td>
+                  <td className="py-2 text-gray-600">{r.grade}</td>
+                  <td className="py-2 text-right">{r.contrats}</td>
+                  <td className="py-2 text-right">{r.heures_cm}</td>
+                  <td className="py-2 text-right">{r.heures_td}</td>
+                  <td className="py-2 text-right">{r.heures_tp}</td>
+                  <td className="py-2 text-right font-semibold text-gray-900">{r.heures_total} h</td>
+                </tr>
+              ))}
+            </tbody>
+            {data && (
+              <tfoot>
+                <tr className="font-semibold text-gray-900">
+                  <td className="py-2">TOTAL</td>
+                  <td></td>
+                  <td className="py-2 text-right">{data.totaux.contrats}</td>
+                  <td className="py-2 text-right">{data.totaux.heures_cm}</td>
+                  <td className="py-2 text-right">{data.totaux.heures_td}</td>
+                  <td className="py-2 text-right">{data.totaux.heures_tp}</td>
+                  <td className="py-2 text-right text-enastic-700">{data.totaux.heures_total} h</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
     </div>
   );
 }
