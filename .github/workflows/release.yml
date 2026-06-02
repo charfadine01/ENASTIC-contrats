@@ -52,6 +52,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "./desktop/src-tauri -> target"
+          # Ne sauvegarder le cache que sur la branche main : les builds
+          # déclenchés par tag (release) se contentent de LIRE le cache.
+          # Évite que l'étape « Post Cache Rust » (sauvegarde) ne fasse
+          # échouer une release pour une erreur transitoire de cache.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build API sidecar with PyInstaller
         working-directory: api
